@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ผู้ดูแลระบบเช็คชื่อ</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f3f6f9;margin:0;color:#1f2937}
+.wrap{max-width:1100px;margin:auto;padding:18px}.card{background:#fff;padding:20px;border-radius:16px;margin:12px 0;box-shadow:0 4px 15px #0001}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+input,select,button{width:100%;box-sizing:border-box;padding:11px;border:1px solid #ccd3da;border-radius:9px}
+button{background:#0b63ce;color:#fff;border:0;font-weight:bold}
+table{width:100%;border-collapse:collapse;margin-top:15px;font-size:14px}th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left}
+#app{display:none}.msg{padding:10px;border-radius:8px;margin:8px 0}.ok{background:#e9f8ee}.err{background:#fff0f0}
+.qrbox{display:flex;flex-wrap:wrap;gap:18px}.qritem{border:1px solid #ddd;padding:14px;border-radius:10px;text-align:center}
+canvas{max-width:220px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div id="login" class="card">
+<h2>ผู้ดูแลระบบ</h2>
+<p>กรอก PIN ผู้ดูแลระบบ</p>
+<input id="pin" type="password" placeholder="Admin PIN">
+<button onclick="login()" style="margin-top:10px">เข้าสู่ระบบ</button>
+<div id="loginMsg"></div>
+</div>
+
+<div id="app">
+<div class="card">
+<h2>จัดการหลักสูตร / รุ่น</h2>
+<div class="grid">
+<input id="course_id" placeholder="รหัสหลักสูตร/QR เช่น TAK-001">
+<input id="course_name" placeholder="ชื่อหลักสูตร">
+<input id="batch_no" placeholder="รุ่น">
+<input id="training_date" type="date">
+<input id="venue_name" placeholder="สถานที่ฝึกอบรม">
+<input id="lat" type="number" step="any" placeholder="Latitude">
+<input id="lng" type="number" step="any" placeholder="Longitude">
+<input id="radius_m" type="number" value="120" placeholder="รัศมีเมตร">
+</div>
+<label style="display:block;margin:10px 0"><input id="active" type="checkbox" checked style="width:auto"> เปิดใช้งาน</label>
+<button onclick="saveCourse()">บันทึกหลักสูตร</button>
+<div id="courseMsg"></div>
+</div>
+
+<div class="card">
+<h2>เพิ่มผู้เข้ารับการฝึกอบรม</h2>
+<div class="grid">
+<input id="t_id" placeholder="รหัสผู้เข้าอบรม">
+<input id="t_course" placeholder="รหัสหลักสูตร">
+<input id="t_batch" placeholder="รุ่น">
+<input id="t_name" placeholder="ชื่อ-สกุล">
+<input id="t_idcard" placeholder="เลขบัตรประชาชน (ถ้าจำเป็น)">
+<input id="t_phone" placeholder="โทรศัพท์">
+</div>
+<button onclick="saveTrainee()" style="margin-top:10px">เพิ่มรายชื่อ</button>
+<div id="traineeMsg"></div>
+</div>
+
+<div class="card">
+<h2>QR Code หลักสูตร/รุ่น</h2>
+<div id="qrArea" class="qrbox"></div>
+</div>
+
+<div class="card">
+<h2>รายงานการเช็คชื่อ</h2>
+<div class="grid">
+<input id="fdate" type="date">
+<input id="fcourse" placeholder="รหัสหลักสูตร (ว่าง = ทั้งหมด)">
+<select id="fsession"><option value="">ทุกช่วง</option><option value="morning">เช้า</option><option value="afternoon">บ่าย</option></select>
+</div>
+<button onclick="loadAttendance()" style="margin-top:10px">ค้นหา</button>
+<div id="report"></div>
+</div>
+</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+let PIN='';
+let courses=[];
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+
+function login(){
+  const pin=document.getElementById('pin').value;
+  google.script.run.withSuccessHandler(r=>{
+    if(r.ok){PIN=pin;document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';loadCourses();}
+    else document.getElementById('loginMsg').innerHTML='<div class="msg err">'+esc(r.message)+'</div>';
+  }).adminLogin(pin);
+}
+
+function loadCourses(){
+  google.script.run.withSuccessHandler(r=>{courses=r;renderQR();})
+    .withFailureHandler(e=>alert(e.message)).listCourses(PIN);
+}
+
+function saveCourse(){
+  const data={
+    course_id:course_id.value,course_name:course_name.value,batch_no:batch_no.value,
+    training_date:training_date.value,venue_name:venue_name.value,
+    lat:lat.value,lng:lng.value,radius_m:radius_m.value,active:active.checked
+  };
+  google.script.run.withSuccessHandler(()=>{
+    document.getElementById('courseMsg').innerHTML='<div class="msg ok">บันทึกแล้ว</div>';loadCourses();
+  }).withFailureHandler(e=>{
+    document.getElementById('courseMsg').innerHTML='<div class="msg err">'+esc(e.message)+'</div>';
+  }).saveCourse(PIN,data);
+}
+
+function saveTrainee(){
+  const data={trainee_id:t_id.value,course_id:t_course.value,batch_no:t_batch.value,name:t_name.value,id_card:t_idcard.value,phone:t_phone.value,active:true};
+  google.script.run.withSuccessHandler(()=>{
+    document.getElementById('traineeMsg').innerHTML='<div class="msg ok">เพิ่มรายชื่อแล้ว</div>';
+  }).withFailureHandler(e=>{
+    document.getElementById('traineeMsg').innerHTML='<div class="msg err">'+esc(e.message)+'</div>';
+  }).saveTrainee(PIN,data);
+}
+
+function renderQR(){
+  const area=document.getElementById('qrArea');area.innerHTML='';
+  const base=location.href.split('?')[0];
+  courses.filter(c=>c.active).forEach(c=>{
+    const url=base+'?course='+encodeURIComponent(c.course_id);
+    const div=document.createElement('div');div.className='qritem';
+    div.innerHTML='<b>'+esc(c.course_name)+'</b><br>รุ่น '+esc(c.batch_no)+'<br><span class="small">'+esc(c.training_date)+'</span><div class="qr"></div><button style="margin-top:8px" onclick="copyURL('+JSON.stringify(url)+')">คัดลอกลิงก์</button>';
+    area.appendChild(div);
+    new QRCode(div.querySelector('.qr'),{text:url,width:180,height:180});
+  });
+}
+function copyURL(url){navigator.clipboard?.writeText(url);alert('คัดลอกลิงก์แล้ว');}
+
+function loadAttendance(){
+  const filters={date:fdate.value,course_id:fcourse.value.trim(),session:fsession.value};
+  google.script.run.withSuccessHandler(rows=>{
+    let html='<table><tr><th>เวลา</th><th>รหัส</th><th>ชื่อ</th><th>รอบ</th><th>ระยะ(m)</th><th>ผล</th></tr>';
+    rows.forEach(r=>html+='<tr><td>'+esc(r.timestamp)+'</td><td>'+esc(r.trainee_id)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.session==='morning'?'เช้า':'บ่าย')+'</td><td>'+r.distance_m+'</td><td>'+esc(r.result)+'</td></tr>');
+    html+='</table><p>จำนวนรายการ: '+rows.length+'</p>';
+    document.getElementById('report').innerHTML=html;
+  }).withFailureHandler(e=>alert(e.message)).getAttendance(PIN,filters);
+}
+</script>
+</body>
+</html>

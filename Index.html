@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>เช็คชื่อเข้าฝึกอบรม</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f3f6f9;margin:0;color:#1f2937}
+.wrap{max-width:520px;margin:auto;padding:18px}
+.card{background:white;border-radius:18px;padding:22px;box-shadow:0 5px 20px #0001;margin-top:15px}
+h1{font-size:24px;margin:0 0 8px}
+.small{color:#6b7280;font-size:14px}
+label{display:block;margin-top:14px;font-weight:bold}
+input,select,button{width:100%;box-sizing:border-box;padding:13px;border:1px solid #d1d5db;border-radius:10px;font-size:16px}
+button{background:#0b63ce;color:#fff;border:0;font-weight:bold;margin-top:14px}
+button:disabled{opacity:.5}
+.info{background:#eef6ff;padding:12px;border-radius:10px;margin-top:12px}
+.ok{background:#eaf8ef;color:#12652f;padding:14px;border-radius:10px}
+.err{background:#fff0f0;color:#a51d2d;padding:14px;border-radius:10px}
+.qr{font-size:13px;word-break:break-all;background:#f6f6f6;padding:8px;border-radius:8px}
+.spinner{display:none;text-align:center;margin:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>ระบบเช็คชื่อเข้าฝึกอบรม</h1>
+    <div class="small">สแกน QR ของหลักสูตร/รุ่น แล้วอนุญาตให้ระบบตรวจสอบตำแหน่ง</div><div class="small" style="margin-top:6px">ระบบผูกการเช็คชื่อกับอุปกรณ์ เพื่อป้องกันการใช้โทรศัพท์เครื่องเดียวกันเช็คชื่อแทนผู้อื่น</div>
+
+    <div id="courseBox" class="info">กำลังตรวจสอบ QR...</div>
+
+    <label>รหัสผู้เข้ารับการฝึกอบรม</label>
+    <input id="traineeId" placeholder="เช่น 001 หรือรหัสที่หน่วยงานกำหนด" autocomplete="off">
+
+    <label>รอบการเช็คชื่อ</label>
+    <select id="session">
+      <option value="morning">เช้า</option>
+      <option value="afternoon">บ่าย</option>
+    </select>
+
+    <button id="btn" onclick="submitCheckin()">เช็คชื่อเข้าฝึกอบรม</button>
+    <div id="spinner" class="spinner">กำลังอ่าน GPS และบันทึกข้อมูล...</div>
+    <div id="result" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const qrToken = params.get('course') || params.get('qr') || '';
+function getDeviceId(){
+  let id=localStorage.getItem('training_attendance_device_id');
+  if(!id){ id=(crypto.randomUUID ? crypto.randomUUID() : 'dev-'+Date.now()+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2)); localStorage.setItem('training_attendance_device_id',id); }
+  return id;
+}
+const deviceId=getDeviceId();
+
+function esc(s){
+  return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+}
+
+function loadCourse(){
+  if(!qrToken){
+    document.getElementById('courseBox').innerHTML =
+      '<div class="err">ไม่พบรหัส QR ของหลักสูตร กรุณาสแกน QR ที่หน่วยงานกำหนด</div>';
+    return;
+  }
+  google.script.run.withSuccessHandler(c=>{
+    window.course=c;
+    document.getElementById('courseBox').innerHTML =
+      '<b>'+esc(c.course_name)+'</b><br>รุ่น '+esc(c.batch_no)+
+      '<br>วันที่ '+esc(c.training_date)+'<br>สถานที่ '+esc(c.venue_name)+
+      '<br>รัศมีอนุญาต '+Math.round(c.radius_m)+' เมตร';
+  }).withFailureHandler(e=>{
+    document.getElementById('courseBox').innerHTML='<div class="err">'+esc(e.message)+'</div>';
+  }).getCourseByQR(qrToken);
+}
+
+function submitCheckin(){
+  const traineeId=document.getElementById('traineeId').value.trim();
+  const session=document.getElementById('session').value;
+  if(!window.course){alert('ยังไม่พบข้อมูลหลักสูตร');return}
+  if(!traineeId){alert('กรุณากรอกรหัสผู้เข้ารับการฝึกอบรม');return}
+
+  const btn=document.getElementById('btn');
+  btn.disabled=true;
+  document.getElementById('spinner').style.display='block';
+  document.getElementById('result').innerHTML='';
+
+  if(!navigator.geolocation){
+    showError('อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง GPS');
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const p=pos.coords;
+    google.script.run.withSuccessHandler(r=>{
+      btn.disabled=false;
+      document.getElementById('spinner').style.display='none';
+      if(r.duplicate){
+        document.getElementById('result').innerHTML='<div class="info"><b>'+esc(r.message)+'</b><br>'+esc(r.trainee.name)+'</div>';
+      }else{
+        document.getElementById('result').innerHTML='<div class="ok"><b>'+esc(r.message)+'</b><br>'+
+          esc(r.trainee.name)+'<br>หลักสูตร: '+esc(r.course.course_name)+' รุ่น '+esc(r.course.batch_no)+
+          '<br>ระยะจากจุดฝึก: '+r.distance+' เมตร</div>';
+      }
+    }).withFailureHandler(e=>{
+      showError(e.message);
+    }).checkIn({
+      qrToken:qrToken,
+      traineeId:traineeId,
+      lat:p.latitude,
+      lng:p.longitude,
+      accuracy:p.accuracy,
+      session:session,
+      deviceId:deviceId,
+      userAgent:navigator.userAgent
+    });
+  },err=>{
+    let msg='ไม่สามารถอ่านตำแหน่งได้';
+    if(err.code===1) msg='คุณไม่อนุญาตให้เข้าถึงตำแหน่ง กรุณาเปิด Location แล้วลองใหม่';
+    if(err.code===2) msg='ไม่พบตำแหน่ง GPS กรุณาเปิด GPS/Location และลองใหม่';
+    if(err.code===3) msg='การอ่าน GPS ใช้เวลานานเกินไป กรุณาลองใหม่';
+    showError(msg);
+  },{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+}
+
+function showError(msg){
+  document.getElementById('btn').disabled=false;
+  document.getElementById('spinner').style.display='none';
+  document.getElementById('result').innerHTML='<div class="err">'+esc(msg)+'</div>';
+}
+loadCourse();
+</script>
+</body>
+</html>
